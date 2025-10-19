@@ -2,7 +2,7 @@ import json
 import os
 import re
 from collections import defaultdict
-from . import hook
+#from . import hook
 from .defs.captures import CAPTURE_FIELD_LIST
 from .defs.meta import MetaField
 from .defs.formatters import calc_lora_hash, calc_model_hash, extract_embedding_names, extract_embedding_hashes
@@ -11,65 +11,68 @@ from .utils.log import print_warning
 from nodes import NODE_CLASS_MAPPINGS
 from .trace import Trace
 from execution import get_input_data
-from comfy_execution.graph import DynamicPrompt
+from comfy_execution.graph import DynamicPrompt, ExecutionList 
 
 
 class Capture:
     @classmethod
-    def get_inputs(cls):
-        inputs = {}
-        prompt = hook.current_prompt
-        extra_data = hook.current_extra_data
-        if hook.prompt_executer and hook.prompt_executer.caches:
-            outputs = hook.prompt_executer.caches.outputs
-        else:
-            outputs = None
+    def get_inputs(self):
+        if Capture.instance is None:
+            return {}
 
-        for node_id, obj in prompt.items():
-            class_type = obj["class_type"]
-            obj_class = NODE_CLASS_MAPPINGS[class_type]
-            node_inputs = prompt[node_id]["inputs"]
-            input_data = get_input_data(
-                node_inputs, obj_class, node_id, outputs, DynamicPrompt(prompt), extra_data
+        prompt_executor = execution.PromptExecutor.instance
+        if not hasattr(prompt_executor, 'prompt'):
+            return {}
+
+        # Get the necessary objects from the current execution state
+        prompt = prompt_executor.prompt
+        caches = prompt_executor.caches
+        dynamic_prompt = DynamicPrompt(prompt)
+        execution_list = ExecutionList(dynamic_prompt, caches.outputs)
+
+        inputs = {}
+        for node_id, (node, active) in Capture.instance.nodes.items():
+            if not active:
+                continue
+
+            # Ensure the node exists in the current prompt before processing
+            if node_id not in prompt:
+                continue
+            
+            class_def = nodes.NODE_CLASS_MAPPINGS[node["class_type"]]
+            
+            # Call get_input_data with the correct arguments: execution_list and dynamic_prompt
+            input_data, _, _ = get_input_data(
+                node["inputs"],
+                class_def,
+                node_id,
+                execution_list, # Pass the ExecutionList object
+                dynamic_prompt, # Pass the DynamicPrompt object
             )
 
-            # Process field data mappings for the captured inputs
-            for node_class, metas in CAPTURE_FIELD_LIST.items():
-                if class_type != node_class:
+            if not input_data:
+                continue
+
+            for name, data in input_data.items():
+                input_info = next(
+                    (
+                        i
+                        for i in node["inputs"]
+                        if i.get("name") == name and type(i.get("link")) is int
+                    ),
+                    None,
+                )
+                if input_info is not None:
                     continue
-                
-                for meta, field_data in metas.items():
-                    # Skip invalidated nodes
-                    if field_data.get("validate") and not field_data["validate"](
-                        node_id, obj, prompt, extra_data, outputs, input_data
-                    ):
-                        continue
 
-                    # Initialize list for meta if not exists
-                    if meta not in inputs:
-                        inputs[meta] = []
-
-                    # Get field value or selector
-                    value = field_data.get("value")
-                    if value is not None:
-                        inputs[meta].append((node_id, value))
-                    else:
-                        selector = field_data.get("selector")
-                        if selector:
-                            v = selector(node_id, obj, prompt, extra_data, outputs, input_data)
-                            cls._append_value(inputs, meta, node_id, v)
-                            continue
-
-                        # Fetch and process value from field_name
-                        field_name = field_data["field_name"]
-                        value = input_data[0].get(field_name)
-                        if value is not None:
-                            format_func = field_data.get("format")
-                            v = cls._apply_formatting(value, input_data, format_func)
-                            cls._append_value(inputs, meta, node_id, v)
+                if name in inputs and inputs[name] != data[0]:
+                    print(
+                        f"Conflicting input values for '{name}': {inputs[name]} vs {data[0]}"
+                    )
+                inputs[name] = data[0]
 
         return inputs
-
+    
     @staticmethod
     def _apply_formatting(value, input_data, format_func):
         """Apply formatting to a value using the given format function."""
