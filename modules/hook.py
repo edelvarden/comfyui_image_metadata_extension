@@ -1,4 +1,4 @@
-from .nodes.node import SaveImageWithMetaData
+#from .nodes.node import SaveImageWithMetaData
 
 current_prompt = {}
 current_extra_data = {}
