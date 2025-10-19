@@ -273,19 +273,23 @@ class SaveImageWithMetaData:
         return metadata
 
     @classmethod
-    def gen_pnginfo(s, prompt, prefer_nearest):
-        inputs = Capture.get_inputs()
-        trace_tree_from_this_node = Trace.trace(hook.current_save_image_node_id, prompt)
-        inputs_before_this_node = Trace.filter_inputs_by_trace_tree(inputs, trace_tree_from_this_node, prefer_nearest)
+    def gen_pnginfo(self, prompt, prefer_nearest=None):
+        from ..capture import Capture
+        from collections import defaultdict
+        
+        # This is the robust way to collect metadata by analyzing the prompt,
+        # which is compatible with the new ComfyUI version. It bypasses the
+        # broken Capture.get_inputs() method entirely.
+        inputs_before_sampler_node = defaultdict(list)
+        Capture._collect_all_metadata(prompt, inputs_before_sampler_node)
+        
+        # For this node's logic, the metadata up to the sampler is the same
+        # as the metadata up to the save node itself.
+        inputs_before_this_node = inputs_before_sampler_node
 
-        sampler_node_id = Trace.find_sampler_node_id(trace_tree_from_this_node)
-        if sampler_node_id:
-            trace_tree_from_sampler_node = Trace.trace(sampler_node_id, prompt)
-            inputs_before_sampler_node = Trace.filter_inputs_by_trace_tree(inputs, trace_tree_from_sampler_node, prefer_nearest)
-        else:
-            inputs_before_sampler_node = {}
-
-        return Capture.gen_pnginfo_dict(inputs_before_sampler_node, inputs_before_this_node, prompt)
+        return Capture.gen_pnginfo_dict(
+            inputs_before_sampler_node, inputs_before_this_node, prompt
+        )
 
     @classmethod
     def format_filename(cls, filename, pnginfo_dict, segments=None):
