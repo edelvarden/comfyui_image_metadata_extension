@@ -328,7 +328,7 @@ class SaveImageWithMetaData:
                 prompt = pnginfo_dict.get(prompt_key, "")
                 if not prompt:
                     print_warning(f"{prompt_key} not found in pnginfo_dict!")
-                prompt = prompt.replace("\n", " ")
+                prompt = re.sub(r'[^a-zA-Z0-9 ._-]', '', prompt)
                 length = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
                 filename = filename.replace(segment, prompt[:length].strip() if length else prompt.strip())
 
